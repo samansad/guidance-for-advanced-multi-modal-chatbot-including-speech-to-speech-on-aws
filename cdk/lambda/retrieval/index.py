@@ -19,6 +19,17 @@ bedrock_client = boto3.client(service_name='bedrock-runtime')
 # Get knowledge base ID from environment variable
 ops_kb_id = os.environ.get("OPS_KNOWLEDGE_BASE_ID")
 
+# Get number of results for retrival from environment variable or default to 3
+num_results = int(os.environ.get("NUM_RESULTS", "5"))
+
+model_code_name_mapping = {
+    "P42R": "Pathfinder",
+    "PZ1D": "Leaf",
+    "P33A": "Leaf",
+    "SUV" : "Pathfinder",
+    "SUV" : "Rogue"
+}
+
 def get_contexts(retrievalResults):
     """
     Extract context information from retrieval results
@@ -33,7 +44,31 @@ def get_contexts(retrievalResults):
     video_extensions = {'mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm', 'mov'}
     
     for result in retrievalResults:
-        filename = result['location']['s3Location']['uri'].split('/')[-1]
+
+        # Extract data from S3 URI
+        pattern = r'^s3://([^/]+)/(.*/)?([^/]+)$'
+        s3_uri = result['location']['s3Location']['uri']
+        match = re.match(pattern, s3_uri)
+        if not match:
+            raise ValueError("Invalid S3 URI format")
+        folder_path = match.group(2)[:-1] if match.group(2) else ''
+        filename = match.group(3)
+
+
+        #Removing Documents from the top folder layer to test things.
+        folder_path = match.group(2)[:-1] if match.group(2) else ''
+        # new: drop top-level "Documents" if present
+        if folder_path:
+            parts = folder_path.split('/')
+            if parts and parts[0].lower() == 'documents':
+                folder_path_remove_top_layer = '/'.join(parts[1:])
+            else:
+                folder_path_remove_top_layer = folder_path
+        else:
+            folder_path_remove_top_layer = ''
+        logger.info(f"Folder path after removing documents folder: {folder_path_remove_top_layer}")
+
+        #filename = result['location']['s3Location']['uri'].split('/')[-1]
         # Get actual extension from filename (part after last underscore, before any dot)
         actual_extension = filename.split('_')[-1].split('.')[0]
         
@@ -41,9 +76,13 @@ def get_contexts(retrievalResults):
         logger.info(f"Adding context from {filename} as {source} type")
         contexts.extend([
             f'<source>{source}</source>',
-            f'<location>{filename}</location>',
+            f'<location>{folder_path_remove_top_layer}/{filename}</location>',
+            #f'<folder>{folder_path}</folder>',
             result['content']['text']
         ])
+        # Adding logs to see if Bedrock model returns folder structure.
+        uri = result['location']['s3Location']['uri']
+        logger.info(f"KB hit URI returned from model: {uri}")
     return contexts
 
 def retrieve_results(query, kb_id):
@@ -57,17 +96,26 @@ def retrieve_results(query, kb_id):
     Returns:
         List of context information strings
     """
-    logger.info(f"Retrieving from knowledge base {kb_id} for query: {query}")
     
+    # expand the query with model code and model names
+    expanded_query = query
+    for model_code, model_name in model_code_name_mapping.items():
+        if (model_code in query) or (model_name in query):
+            note = f"(Note: {model_code} refers to {model_name})"
+            if note not in expanded_query:
+                expanded_query += " " + note
+
+    logger.info(f"Retrieving results for query: {expanded_query}")
+
     try:
         results = bedrock_agent_runtime_client.retrieve(
             retrievalQuery={
-                'text': query
+                'text': expanded_query
             },
             knowledgeBaseId=kb_id,
             retrievalConfiguration={
                 'vectorSearchConfiguration': {
-                    'numberOfResults': 3,
+                    'numberOfResults': num_results,
                     'overrideSearchType': "HYBRID",
                 }
             }
@@ -225,6 +273,9 @@ def lambda_handler(event, context):
         # Retrieve relevant information from knowledge base
         retrieved_info = retrieve_results(query, ops_kb_id)
 
+        # Adding logs to see if Bedrock model returns folder structure.
+        logger.info(f"Retrieved info: {retrieved_info}")
+
         # Construct the prompt
         prompt = [{"text": f"""
         You are a question answering agent. The user will provide you with a question. 
@@ -247,13 +298,12 @@ def lambda_handler(event, context):
           * Use ordered lists for multiple points
         
         Part 2 - Location:
-        - List ONLY the <location> tags from sources that contributed to your answer
-        - Format must be exactly:
-        <location>file_name.pdf</location>
-        <location>another_file_mp4.txt</location>
-        - One location tag per line
-        - DO NOT include any other tags or text
-        
+        - List ONLY the <location> tags from sources that contributed to your answer.
+        - If a <folder> tag exists and is non-empty, combine it with the <location> value using a slash: <location>folder/filename</location>
+        - If no <folder> is present, just output the filename: <location>filename</location>
+        - One <location> per line. Do not add other text.
+
+                
         ERROR HANDLING:
         - If insufficient information is found or you cannot make a conclusion, state that you cannot provide an exact answer and request more context if appropriate. DO NOT add <location> </location> or <answer> </answer> tags
         
@@ -263,6 +313,10 @@ def lambda_handler(event, context):
         </context>
         """}]
         
+        #Logging Prompt for debugging
+        logger.info(f"Prompt: {prompt}")
+
+
         # Generate the response
         response = generate_conversation(
             model_id,
@@ -274,6 +328,9 @@ def lambda_handler(event, context):
             top_p=top_p
         )
         
+        #logging response to ensure how AI is working.
+        logger.info(f"AI Response: {response}")
+
         # Get the generated text
         generated_text = response['output']['message']
         logger.info(f'Generated response')

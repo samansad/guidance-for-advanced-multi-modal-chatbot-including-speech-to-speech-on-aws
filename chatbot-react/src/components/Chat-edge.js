@@ -1,9 +1,6 @@
 import React, { useState, useRef, useEffect, Suspense } from 'react';
 import { Auth } from 'aws-amplify';
 import { getCloudFrontDomain } from '../config/amplify-config';
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
-import { fromCognitoIdentityPool } from '@aws-sdk/credential-provider-cognito-identity';
-import { CognitoIdentityClient } from '@aws-sdk/client-cognito-identity';
 import VideoPopover from './VideoPopover-edge';
 import FormField from "@cloudscape-design/components/form-field";
 import ChatBubble from "@cloudscape-design/chat-components/chat-bubble";
@@ -145,6 +142,10 @@ const Chat = () => {
   const audioPlayerRef = useRef(null);
   const s2sManagerRef = useRef(null);
 
+  //Adding for WebSocket
+  const [ws, setWs] = useState(null);
+  const wsRef = useRef(null);
+
   // Initialize S2S manager
   useEffect(() => {
     s2sManagerRef.current = new S2SManager({
@@ -273,6 +274,36 @@ const Chat = () => {
     }
   }, [audioPlayerRef.current, s2sManagerRef.current]);
 
+  // Added for WebSocket
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const socket = new window.WebSocket(process.env.REACT_APP_WEBSOCKET_URL);
+    wsRef.current = socket;
+    setWs(socket);
+
+    socket.onopen = () => {
+      console.log('WebSocket connected');
+    };
+
+    socket.onmessage = (event) => {
+    let data = event.data;
+    try { data = JSON.parse(event.data); } catch (_) {}
+    setMessages(prev => [...prev, { role: 'assistant', content: typeof data === 'string' ? data : JSON.stringify(data) }]);
+  };
+
+    socket.onerror = (err) => {
+      console.error('WebSocket error:', err);
+    };
+
+    socket.onclose = () => {
+      console.log('WebSocket closed');
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, []);
+
   const startListening = () => {
     if (useS2S) {
       if (s2sManagerRef.current) {
@@ -360,119 +391,33 @@ const Chat = () => {
     if (!input.trim()) return;
 
     const userMessage = input.trim();
-    setInput(''); 
+    setInput('');
     setIsLoading(true);
 
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
 
-    try {
-      const session = await Auth.currentSession();
-      const token = session.getIdToken().getJwtToken();
-
-      const lambda = new LambdaClient({
-        region: process.env.REACT_APP_AWS_REGION,
-        credentials: fromCognitoIdentityPool({
-          client: new CognitoIdentityClient({ 
-            region: process.env.REACT_APP_AWS_REGION 
-          }),
-          identityPoolId: process.env.REACT_APP_IDENTITY_POOL_ID,
-          logins: {
-            [`cognito-idp.${process.env.REACT_APP_AWS_REGION}.amazonaws.com/${process.env.REACT_APP_USER_POOL_ID}`]: token
-          }
-        })
-      });
-
-      const payload = {
-        question: userMessage,
-        messages: [{
-          role: 'user',
-          content: [{ text: userMessage }]
-        }],
-        guardrailId: guardrailValue,
-        guardrailVersion: guardrailVersion,
-        temperature: temperature,
-        topP: topP,
-        modelId: modelId
-      };
-
-      const command = new InvokeCommand({
-        FunctionName: process.env.REACT_APP_LAMBDA_FUNCTION_NAME,
-        Payload: JSON.stringify(payload)
-      });
-
-      const response = await lambda.send(command);
-
-      if (response.FunctionError) {
-        throw new Error(`Lambda function error: ${response.FunctionError}`);
-      }
-
-      const result = JSON.parse(new TextDecoder().decode(response.Payload));
-
-      if (result.statusCode !== 200) {
-        throw new Error(`API error: ${result.body}`);
-      }
-
-      // If result.body is a string, parse it
-      // let parsedBody;
-      // if (typeof result.body === 'string') {
-      //     parsedBody = JSON.parse(result.body);
-      // } else {
-      //     parsedBody = result.body;
-      // }
-      // console.log("Parsed Body: ", parsedBody);
-
-      // const content = parsedBody.answer;
-      const content = result.body.answer.content[0].text;
-
-      if (content.includes('</answer>')) {
-        const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
-
-        // Check for location tags within answer
-        let processedAnswer = answerText;
-        let locationTags = '';
-        if (answerText.includes('<location>')) {
-          // Extract location information
-          const locationMatch = answerText.match(/<location>(.*?)<\/location>/s);
-          if (locationMatch) {
-              locationTags = `<location>${locationMatch[1]}</location>`;
-              // Remove location tags from the answer
-              processedAnswer = answerText.replace(/<location>.*?<\/location>/s, '').trim();
-          }
-        }
-        // Combine metadata with location tags
-        const combinedMetadata = locationTags ? `${locationTags}\n${metadataText}` : metadataText;
-  
-        const metadata = parseMetadata(combinedMetadata.split('\n'));
-        setParsedMetadata(metadata);
-  
-        const parsedAnswer = parseTimestamps(answerText, metadata);
-        
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: parsedAnswer,
-          metadata: metadata
-        }]);
-      } else {
-        // Handle content without answer tags but possibly with location tags
-        let processedContent = content;
-        if (content.includes('<location>')) {
-          // Remove location tags and their content completely
-          processedContent = content.replace(/<location>.*?<\/location>/s, '').trim();
-        }
-
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: processedContent 
-        }]);
-      }
-    } catch (error) {
+    const payload = {
+      question: userMessage,
+      messages: [{
+        role: 'user',
+        content: [{ text: userMessage }]
+      }],
+      guardrailId: guardrailValue,
+      guardrailVersion: guardrailVersion,
+      temperature: temperature,
+      topP: topP
+    };
+    console.log('Payload to be sent:', payload);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(payload));
+    } else {
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Error: ${error.message}. Please try again.`
+        content: 'WebSocket is not connected. Please try again.'
       }]);
-    } finally {
-      setIsLoading(false);
     }
+
+    setIsLoading(false);
   };
 
   return (
