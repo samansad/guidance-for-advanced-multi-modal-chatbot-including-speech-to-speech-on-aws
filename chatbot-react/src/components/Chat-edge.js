@@ -58,11 +58,12 @@ const parseMetadata = (metadataLines) => {
 };
 
 const parseTimestamps = (answer, parsedMetadata) => {
+
+  console.log('Parsed metadata:', parsedMetadata);
   return answer.replace(/\[(\d+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
     
     if (Object.keys(parsedMetadata).includes(filename)) {
       const actual_extension = filename.split('_').pop().split('.')[0];
-      
       if (MEDIA_EXTENSIONS.has(actual_extension)) {
         const formattedTime = convertTime(seconds);
         const result = `|||TIMESTAMP:${seconds}:${formattedTime}:${filename}|||`;
@@ -286,10 +287,79 @@ const Chat = () => {
     };
 
     socket.onmessage = (event) => {
-    let data = event.data;
-    try { data = JSON.parse(event.data); } catch (_) {}
-    setMessages(prev => [...prev, { role: 'assistant', content: typeof data === 'string' ? data : JSON.stringify(data) }]);
-  };
+      try {
+        let data = event.data;
+        console.log('WebSocket message received:', data);
+        // Try to parse as JSON if possible
+        try { data = JSON.parse(event.data); } catch (_) {}
+
+        // If the socket returns the same structure as Lambda, extract content
+        let content;
+        if (data && data.body && data.body.answer && data.body.answer.content && data.body.answer.content[0] && data.body.answer.content[0].text) {
+          content = data.body.answer.content[0].text;
+        } else if (typeof data === 'string') {
+          content = data;
+        } else {
+          content = JSON.stringify(data);
+        }
+
+        if (content.includes('</answer>')) {
+          console.log('Found answer tags in content');
+          const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
+
+          // Check for location tags within answer
+          let processedAnswer = answerText;
+          let locationTags = '';
+          if (answerText.includes('<location>')) {
+            console.log('Answer contains location tags');
+            // FIXED: Correct regex for location tag
+            const locationMatch = answerText.match(/<location>(.*?)<\/location>/s);
+            console.log('Location match:', locationMatch);
+            if (locationMatch) {
+              locationTags = `<location>${locationMatch[1]}</location>`;
+              processedAnswer = answerText.replace(/<location>.*?<\/location>/s, '').trim();
+              console.log('Extracted location tags:', locationTags);
+              console.log('Processed answer without location tags:', processedAnswer);
+            }
+          }
+          // Combine metadata with location tags
+          const combinedMetadata = locationTags ? `${locationTags}\n${metadataText}` : metadataText;
+          console.log('Combined Metadata:', combinedMetadata);
+          console.log('Metadata Text:', metadataText);
+          console.log('Location Tags:', locationTags);
+
+          const metadata = parseMetadata(combinedMetadata.split('\n'));
+          setParsedMetadata(metadata);
+          console.log('answerText:', answerText);
+          console.log('parsedAnswer before Timestamps:', processedAnswer);
+          const parsedAnswer = parseTimestamps(answerText, metadata);
+          console.log('parsedAnswer after Timestamps:', parsedAnswer);
+
+          setMessages(prev => [...prev, { 
+            role: 'assistant', 
+            content: parsedAnswer.replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+            metadata: metadata // if available
+          }]);
+        } else {
+          // Handle content without answer tags but possibly with location tags
+          let processedContent = content;
+          if (content.includes('<location>')) {
+            // FIXED: Correct regex for location tag
+            processedContent = content.replace(/<location>.*?<\/location>/s, '').trim();
+          }
+
+          setMessages(prev => [...prev, { 
+            role: 'assistant', 
+            content: processedContent.replace(/\\n/g, '\n').replace(/\\"/g, '"') 
+          }]);
+        }
+      } catch (error) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Error parsing socket message: ${error.message}\nRaw: ${event.data}`
+        }]);
+      }
+    };
 
     socket.onerror = (err) => {
       console.error('WebSocket error:', err);
