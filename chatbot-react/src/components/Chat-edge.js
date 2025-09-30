@@ -291,30 +291,27 @@ const Chat = () => {
         let data = event.data;
         console.log('WebSocket message received:', data);
         // Try to parse as JSON if possible
-        try { data = JSON.parse(event.data); } catch (_) {}
+        //try { data = JSON.parse(event.data); } catch (_) {}
 
-        // If the socket returns the same structure as Lambda, extract content
+        const result = JSON.parse(data);
         let content;
-        if (data && data.body && data.body.answer && data.body.answer.content && data.body.answer.content[0] && data.body.answer.content[0].text) {
-          content = data.body.answer.content[0].text;
-        } else if (typeof data === 'string') {
-          content = data;
-        } else {
-          content = JSON.stringify(data);
-        }
+        content = result.answer.content[0].text;
+        console.log('Extracted content:', content);
+        content = content.replace(/\\n/g, '\n');
+        console.log('Content after newline replacement:', content);
 
         if (content.includes('</answer>')) {
-          console.log('Found answer tags in content');
           const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
 
+
+          console.log('Answer Text:', answerText);
+          console.log('Metadata Text:', metadataText);
           // Check for location tags within answer
           let processedAnswer = answerText;
           let locationTags = '';
           if (answerText.includes('<location>')) {
-            console.log('Answer contains location tags');
             // FIXED: Correct regex for location tag
             const locationMatch = answerText.match(/<location>(.*?)<\/location>/s);
-            console.log('Location match:', locationMatch);
             if (locationMatch) {
               locationTags = `<location>${locationMatch[1]}</location>`;
               processedAnswer = answerText.replace(/<location>.*?<\/location>/s, '').trim();
@@ -324,16 +321,10 @@ const Chat = () => {
           }
           // Combine metadata with location tags
           const combinedMetadata = locationTags ? `${locationTags}\n${metadataText}` : metadataText;
-          console.log('Combined Metadata:', combinedMetadata);
-          console.log('Metadata Text:', metadataText);
-          console.log('Location Tags:', locationTags);
 
           const metadata = parseMetadata(combinedMetadata.split('\n'));
           setParsedMetadata(metadata);
-          console.log('answerText:', answerText);
-          console.log('parsedAnswer before Timestamps:', processedAnswer);
           const parsedAnswer = parseTimestamps(answerText, metadata);
-          console.log('parsedAnswer after Timestamps:', parsedAnswer);
 
           setMessages(prev => [...prev, { 
             role: 'assistant', 
