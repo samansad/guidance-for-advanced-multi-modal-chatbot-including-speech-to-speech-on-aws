@@ -278,91 +278,102 @@ const Chat = () => {
   // Added for WebSocket
   // Initialize WebSocket connection
   useEffect(() => {
-    const socket = new window.WebSocket(process.env.REACT_APP_WEBSOCKET_URL);
+    /*const socket = new window.WebSocket(process.env.REACT_APP_WEBSOCKET_URL);
     wsRef.current = socket;
-    setWs(socket);
+    setWs(socket);*/
+    console.log('Setting up WebSocket connection...');
+    const setupSocket = async () => {
+      console.log('Fetching auth token for WebSocket...');
+      const session = await Auth.currentSession();
+      const accessToken = session.getAccessToken().getJwtToken();
+      const url = `${process.env.REACT_APP_WEBSOCKET_URL}?auth=${encodeURIComponent(accessToken)}`;
+      const socket = new WebSocket(url);
+      wsRef.current = socket;
+      setWs(socket);
 
-    socket.onopen = () => {
-      console.log('WebSocket connected');
-    };
+      socket.onopen = () => {
+        console.log("WebSocket connected");
+      };
 
-    socket.onmessage = (event) => {
-      try {
-        let data = event.data;
-        console.log('WebSocket message received:', data);
-        // Try to parse as JSON if possible
-        //try { data = JSON.parse(event.data); } catch (_) {}
+      socket.onmessage = (event) => {
+        try {
+          let data = event.data;
+          console.log('WebSocket message received:', data);
+          // Try to parse as JSON if possible
+          //try { data = JSON.parse(event.data); } catch (_) {}
 
-        const result = JSON.parse(data);
-        let content;
-        content = result.answer.content[0].text;
-        console.log('Extracted content:', content);
-        content = content.replace(/\\n/g, '\n');
-        console.log('Content after newline replacement:', content);
+          const result = JSON.parse(data);
+          let content;
+          content = result.answer.content[0].text;
+          console.log('Extracted content:', content);
+          content = content.replace(/\\n/g, '\n');
+          console.log('Content after newline replacement:', content);
 
-        if (content.includes('</answer>')) {
-          const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
+          if (content.includes('</answer>')) {
+            const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
 
 
-          console.log('Answer Text:', answerText);
-          console.log('Metadata Text:', metadataText);
-          // Check for location tags within answer
-          let processedAnswer = answerText;
-          let locationTags = '';
-          if (answerText.includes('<location>')) {
-            // FIXED: Correct regex for location tag
-            const locationMatch = answerText.match(/<location>(.*?)<\/location>/s);
-            if (locationMatch) {
-              locationTags = `<location>${locationMatch[1]}</location>`;
-              processedAnswer = answerText.replace(/<location>.*?<\/location>/s, '').trim();
-              console.log('Extracted location tags:', locationTags);
-              console.log('Processed answer without location tags:', processedAnswer);
+            console.log('Answer Text:', answerText);
+            console.log('Metadata Text:', metadataText);
+            // Check for location tags within answer
+            let processedAnswer = answerText;
+            let locationTags = '';
+            if (answerText.includes('<location>')) {
+              // FIXED: Correct regex for location tag
+              const locationMatch = answerText.match(/<location>(.*?)<\/location>/s);
+              if (locationMatch) {
+                locationTags = `<location>${locationMatch[1]}</location>`;
+                processedAnswer = answerText.replace(/<location>.*?<\/location>/s, '').trim();
+                console.log('Extracted location tags:', locationTags);
+                console.log('Processed answer without location tags:', processedAnswer);
+              }
             }
+            // Combine metadata with location tags
+            const combinedMetadata = locationTags ? `${locationTags}\n${metadataText}` : metadataText;
+
+            const metadata = parseMetadata(combinedMetadata.split('\n'));
+            setParsedMetadata(metadata);
+            const parsedAnswer = parseTimestamps(answerText, metadata);
+
+            setMessages(prev => [...prev, { 
+              role: 'assistant', 
+              content: parsedAnswer.replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+              metadata: metadata // if available
+            }]);
+          } else {
+            // Handle content without answer tags but possibly with location tags
+            let processedContent = content;
+            if (content.includes('<location>')) {
+              // FIXED: Correct regex for location tag
+              processedContent = content.replace(/<location>.*?<\/location>/s, '').trim();
+            }
+
+            setMessages(prev => [...prev, { 
+              role: 'assistant', 
+              content: processedContent.replace(/\\n/g, '\n').replace(/\\"/g, '"') 
+            }]);
           }
-          // Combine metadata with location tags
-          const combinedMetadata = locationTags ? `${locationTags}\n${metadataText}` : metadataText;
-
-          const metadata = parseMetadata(combinedMetadata.split('\n'));
-          setParsedMetadata(metadata);
-          const parsedAnswer = parseTimestamps(answerText, metadata);
-
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            content: parsedAnswer.replace(/\\n/g, '\n').replace(/\\"/g, '"'),
-            metadata: metadata // if available
-          }]);
-        } else {
-          // Handle content without answer tags but possibly with location tags
-          let processedContent = content;
-          if (content.includes('<location>')) {
-            // FIXED: Correct regex for location tag
-            processedContent = content.replace(/<location>.*?<\/location>/s, '').trim();
-          }
-
-          setMessages(prev => [...prev, { 
-            role: 'assistant', 
-            content: processedContent.replace(/\\n/g, '\n').replace(/\\"/g, '"') 
+        } catch (error) {
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `Error parsing socket message: ${error.message}\nRaw: ${event.data}`
           }]);
         }
-      } catch (error) {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: `Error parsing socket message: ${error.message}\nRaw: ${event.data}`
-        }]);
-      }
-    };
+      };
 
-    socket.onerror = (err) => {
-      console.error('WebSocket error:', err);
-    };
+      socket.onerror = (err) => {
+        console.error('WebSocket error:', err);
+      };
 
-    socket.onclose = () => {
-      console.log('WebSocket closed');
+      /*socket.onclose = () => {
+        console.log('WebSocket closed');
+      };*/
+      socket.onclose = (e) => console.error("WS closed", e.code, e.reason);
+      return () => {
+        socket.close();
+      };
     };
-
-    return () => {
-      socket.close();
-    };
+    setupSocket();
   }, []);
 
   const startListening = () => {

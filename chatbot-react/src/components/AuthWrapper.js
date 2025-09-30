@@ -16,7 +16,8 @@ const AuthWrapper = () => {
           />
           <div className={`main-content ${isSidebarCollapsed ? 'collapsed' : ''}`}>
             <div className="header">
-              <h1>Chat Assistant</h1>
+              <img src="/nissan-logo.png" alt="Nissan Logo" style={{ height: '60px', marginBottom: '16px' }} />
+              <h1>Welcome to Nissan Multimodal Chatbot!</h1>
               <button onClick={signOut}>Sign Out</button>
             </div>
             <Chat />
