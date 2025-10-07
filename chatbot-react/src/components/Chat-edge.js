@@ -58,14 +58,13 @@ const parseMetadata = (metadataLines) => {
 };
 
 const parseTimestamps = (answer, parsedMetadata) => {
-
-  console.log('Parsed metadata:', parsedMetadata);
-  return answer.replace(/\[(\d+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
-    
+  return answer.replace(/\[([\d\-]+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
     if (Object.keys(parsedMetadata).includes(filename)) {
       const actual_extension = filename.split('_').pop().split('.')[0];
       if (MEDIA_EXTENSIONS.has(actual_extension)) {
-        const formattedTime = convertTime(seconds);
+        // If seconds is a range, use the first value
+        const firstSeconds = seconds.includes('-') ? seconds.split('-')[0] : seconds;
+        const formattedTime = convertTime(firstSeconds);
         const result = `|||TIMESTAMP:${seconds}:${formattedTime}:${filename}|||`;
         return result;
       } else {
@@ -79,7 +78,8 @@ const parseTimestamps = (answer, parsedMetadata) => {
 const getFileUrl = async (filename) => {
   if (filename) {
     const actual_extension = filename.split('_').pop().split('.')[0];
-    const baseFileName = filename.split('.')[0].replace(`_${actual_extension}`, '');
+    const baseFileName = filename.split('.')[0].replace(`_${actual_extension}`, '').replace(/ /g, '%20');
+    console.log('Fetching URL for: Filename:', filename, '  Base Filename:', baseFileName, '  Extension:', actual_extension);
     try {
       const session = await Auth.currentSession();
       const token = session.getIdToken().getJwtToken();
@@ -537,9 +537,8 @@ const Chat = () => {
                     
                     if (message.metadata && MEDIA_EXTENSIONS.has(actual_extension)) {
                       return (
-                        <Suspense fallback={displayTime}>
+                        <Suspense key={`inline-${partIndex}`} fallback={displayTime}>
                           <AsyncVideoPopover
-                            key={`inline-${partIndex}`}
                             filename={filename}
                             seconds={parseInt(seconds)}
                             displayTime={displayTime}
@@ -594,10 +593,12 @@ const Chat = () => {
                             alert('Error opening content: ' + error.message);
                           }
                         };
+                        // Show file name with extension in the button
+                        const fileNameWithExt = `${baseFileName}.${actualExtension}`;
                         return (
                           <div key={`content-${metaIndex}`} className="know-more-section">
                             <Button onClick={tryOpenDocument}>
-                              Know More
+                              {`Know More (${fileNameWithExt})`}
                             </Button>
                           </div>
                         );
