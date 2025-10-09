@@ -3,6 +3,8 @@ import re
 import boto3
 import json
 import logging
+import csv
+from io import StringIO
 
 # Set up logging
 logger = logging.getLogger()
@@ -22,7 +24,7 @@ ops_kb_id = os.environ.get("OPS_KNOWLEDGE_BASE_ID")
 # Get number of results for retrival from environment variable or default to 3
 num_results = int(os.environ.get("NUM_RESULTS", "5"))
 
-model_code_name_mapping = {
+_default_model_code_name_mapping = {
     "P42R": "Pathfinder",
     "PZ1D": "Leaf",
     "P33A": "Leaf",
@@ -96,7 +98,7 @@ def retrieve_results(query, kb_id):
     Returns:
         List of context information strings
     """
-    
+    model_code_name_mapping = load_model_code_name_mapping_from_s3() or _default_model_code_name_mapping
     # expand the query with model code and model names
     expanded_query = query
     for model_code, model_name in model_code_name_mapping.items():
@@ -231,6 +233,36 @@ def generate_conversation(model_id,
     except Exception as e:
         logger.error(f"Error generating conversation: {e}")
         raise
+
+def load_model_code_name_mapping_from_s3():
+    s3_uri = os.environ.get("MODELCODE_MODELNAME_MAPPING")
+    if not s3_uri:
+        logger.warning("MODELCODE_MODELNAME_MAPPING env var not set, using default mapping.")
+        return None
+
+    # Parse S3 URI
+    match = re.match(r'^s3://([^/]+)/(.+)$', s3_uri)
+    if not match:
+        logger.error(f"Invalid S3 URI format: {s3_uri}")
+        return None
+    bucket, key = match.group(1), match.group(2)
+
+    try:
+        s3 = boto3.client('s3')
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        csv_content = obj['Body'].read().decode('utf-8')
+        reader = csv.DictReader(StringIO(csv_content))
+        mapping = {}
+        for row in reader:
+            code = row.get('model_code')
+            name = row.get('model_name')
+            if code and name:
+                mapping[code] = name
+        logger.info(f"Loaded model_code_name_mapping from S3: {mapping}")
+        return mapping
+    except Exception as e:
+        logger.error(f"Error loading model_code_name_mapping from S3: {e}")
+        return None
 
 def lambda_handler(event, context):
     """
