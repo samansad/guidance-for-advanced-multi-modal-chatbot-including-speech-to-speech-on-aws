@@ -269,12 +269,20 @@ def lambda_handler(event, context):
         guardrail_version = event.get("guardrailVersion")
         temperature = event.get("temperature")
         top_p = event.get("topP")
-
+        chat_history = event.get("chatHistory")
         # Retrieve relevant information from knowledge base
         retrieved_info = retrieve_results(query, ops_kb_id)
 
         # Adding logs to see if Bedrock model returns folder structure.
         logger.info(f"Retrieved info: {retrieved_info}")
+
+        chat_history_context = ""
+        if chat_history and isinstance(chat_history, list) and len(chat_history) > 0:
+                chat_history_context = "\nPrevious conversation (for context):\n"
+                for turn in chat_history:
+                        role = turn.get('role', '')
+                        content = turn.get('content', '')
+                        chat_history_context += f"[{role}] {content}\n"
 
         # Construct the prompt
         prompt = [{"text": f"""
@@ -308,7 +316,8 @@ def lambda_handler(event, context):
                 
         ERROR HANDLING:
         - If insufficient information is found or you cannot make a conclusion, state that you cannot provide an exact answer and request more context if appropriate. DO NOT add <location> </location> or <answer> </answer> tags
-        
+
+        {chat_history_context}
         Here are the search results:
         <context>
         {retrieved_info}

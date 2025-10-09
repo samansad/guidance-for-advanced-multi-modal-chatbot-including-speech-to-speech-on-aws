@@ -461,7 +461,6 @@ const Chat = () => {
     if (!input.trim()) return;
 
     const userMessage = input.trim();
-    saveToSession('user', userMessage);
     setInput('');
     setIsLoading(true);
 
@@ -497,7 +496,7 @@ const Chat = () => {
         content: 'WebSocket is not connected. Please try again.'
       }]);
     }
-
+    saveToSession('user', userMessage);
     setIsLoading(false);
   };
 
