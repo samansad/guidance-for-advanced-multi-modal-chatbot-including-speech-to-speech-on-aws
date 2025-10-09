@@ -294,6 +294,7 @@ def lambda_handler(event, context):
         - YOU MUST remove ALL metadata tags (like [TEXT - Page 0]) from your answer
         - For video sources:
           * You MUST include both location and timestamp in individual square brackets: [timestamp location]
+          * Do NOT modify the location value and do NOT remove folder structure from what was provided in <location>location</location>
           * Example: [23 file_mp4.txt] The speaker mentioned AWS is currently..
           * Use ordered lists for multiple points
         
@@ -301,7 +302,8 @@ def lambda_handler(event, context):
         - List ONLY the <location> tags from sources that contributed to your answer.
         - If a <folder> tag exists and is non-empty, combine it with the <location> value using a slash: <location>folder/filename</location>
         - If no <folder> is present, just output the filename: <location>filename</location>
-        - One <location> per line. Do not add other text.
+        - One <location> per line. Do not add other text. Each line must have <location> and </location>
+        - Each <location></location> tag MUST contain only ONE file. Do NOT place more than one file info in a single 
 
                 
         ERROR HANDLING:

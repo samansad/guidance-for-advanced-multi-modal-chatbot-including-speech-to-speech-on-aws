@@ -308,11 +308,9 @@ const Chat = () => {
           console.log('Extracted content:', content);
           content = content.replace(/\\n/g, '\n');
           console.log('Content after newline replacement:', content);
-
+          saveToSession('assistant', content);
           if (content.includes('</answer>')) {
             const [answerText, metadataText] = content.split('<answer>')[1].split('</answer>');
-
-
             console.log('Answer Text:', answerText);
             console.log('Metadata Text:', metadataText);
             // Check for location tags within answer
@@ -463,10 +461,20 @@ const Chat = () => {
     if (!input.trim()) return;
 
     const userMessage = input.trim();
+    saveToSession('user', userMessage);
     setInput('');
     setIsLoading(true);
 
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+
+    // Get chat history from sessionStorage
+    let chatHistory = [];
+    try {
+      const stored = sessionStorage.getItem('chatSession');
+      if (stored) {
+        chatHistory = JSON.parse(stored);
+      }
+    } catch {}
 
     const payload = {
       question: userMessage,
@@ -477,7 +485,8 @@ const Chat = () => {
       guardrailId: guardrailValue,
       guardrailVersion: guardrailVersion,
       temperature: temperature,
-      topP: topP
+      topP: topP,
+      chatHistory: chatHistory.length > 0 ? chatHistory : undefined
     };
     console.log('Payload to be sent:', payload);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -491,6 +500,16 @@ const Chat = () => {
 
     setIsLoading(false);
   };
+
+  function saveToSession(role, content) {
+    const key = 'chatSession';
+    let chat = [];
+    try {
+      chat = JSON.parse(sessionStorage.getItem(key)) || [];
+    } catch {}
+    chat.push({ role, content });
+    sessionStorage.setItem(key, JSON.stringify(chat));
+  }
 
   return (
     <div className="chat-container">
