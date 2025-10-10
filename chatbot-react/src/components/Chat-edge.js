@@ -10,6 +10,8 @@ import PromptInput from "@cloudscape-design/components/prompt-input";
 import { Button, Toggle } from "@cloudscape-design/components";
 import { useGuardrail, useInferenceConfig } from '../context/AppContext';
 import S2SManager from './helper/S2SManager';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Set of valid media extensions
 const MEDIA_EXTENSIONS = new Set(['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm', 'mov']);
@@ -541,90 +543,87 @@ const Chat = () => {
                 }
               >
                 <div className="custom-message-content">
-                {message.content.split('|||').map((part, partIndex) => {
-                  if (part.startsWith('TIMESTAMP:')) {
-                    const content = part.substring('TIMESTAMP:'.length);
-                    const firstSplit = content.indexOf(':');
-                    const seconds = content.substring(0, firstSplit);
-                    const remaining = content.substring(firstSplit + 1);
-                    const lastColonIndex = remaining.lastIndexOf(':');
-                    const displayTime = remaining.substring(0, lastColonIndex);
-                    const filename = remaining.substring(lastColonIndex + 1);
-                    
-                    const actual_extension = filename?.split('_').pop().split('.')[0];
-                    
-                    if (message.metadata && MEDIA_EXTENSIONS.has(actual_extension)) {
-                      return (
-                        <Suspense key={`inline-${partIndex}`} fallback={displayTime}>
-                          <AsyncVideoPopover
-                            filename={filename}
-                            seconds={parseInt(seconds)}
-                            displayTime={displayTime}
-                            getFileUrl={getFileUrl}
-                          />
-                        </Suspense>
-                      );
-                    }
-                    return displayTime;
-                  }
-                  return <span key={`text-${partIndex}`}>{part}</span>;
-                })}
-                {message.role === 'assistant' && isSpeechSupported && (
-                  <button 
-                    onClick={() => isSpeaking ? stopSpeaking() : speak(message.content)}
-                    style={{
-                      marginLeft: '8px',
-                      padding: '4px',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isSpeaking ? '🔇' : '🔊'}
-                  </button>
-                )}
-                {message.metadata && Object.keys(message.metadata).length > 0 && (
-                  <div className="additional-content">
-                    {Object.keys(message.metadata).map((location, metaIndex) => {
-                      if (location) {
-                        const actualExtension = location.split('_').pop().split('.')[0];
-                        const baseFileName = location.substring(0, location.lastIndexOf('_'));
-                        
-                        const tryOpenDocument = async () => {
-                          try {
-                            const session = await Auth.currentSession();
-                            const token = session.getIdToken().getJwtToken();
-
-                            const cloudFrontDomain = getCloudFrontDomain(); 
-                            const actualExtension = location.split('_').pop().split('.')[0];
-                            const baseFileName = location.substring(0, location.lastIndexOf('_'));
-
-                            const url = `https://${cloudFrontDomain}.cloudfront.net/${baseFileName}.${actualExtension}`;
-                            const encodedToken = encodeURIComponent(token);
-                            const urlWithAuth = `${url}?auth=${encodedToken}`;
-                            
-                            // Use only window.open with noopener for security
-                            window.open(urlWithAuth, '_blank', 'noopener');
-                            
-                          } catch (error) {
-                            console.error('Error:', error);
-                            alert('Error opening content: ' + error.message);
-                          }
-                        };
-                        // Show file name with extension in the button
-                        const fileNameWithExt = `${baseFileName}.${actualExtension}`;
-                        return (
-                          <div key={`content-${metaIndex}`} className="know-more-section">
-                            <Button onClick={tryOpenDocument}>
-                              {`Know More (${fileNameWithExt})`}
-                            </Button>
-                          </div>
-                        );
+                  {/* If no timestamp marker, render whole message as Markdown (with tables support) */}
+                  {!message.content.includes('|||') ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                  ) : (
+                    message.content.split('|||').map((part, partIndex) => {
+                      if (part.startsWith('TIMESTAMP:')) {
+                        const content = part.substring('TIMESTAMP:'.length);
+                        const firstSplit = content.indexOf(':');
+                        const seconds = content.substring(0, firstSplit);
+                        const remaining = content.substring(firstSplit + 1);
+                        const lastColonIndex = remaining.lastIndexOf(':');
+                        const displayTime = remaining.substring(0, lastColonIndex);
+                        const filename = remaining.substring(lastColonIndex + 1);
+                        const actual_extension = filename?.split('_').pop().split('.')[0];
+                        if (message.metadata && MEDIA_EXTENSIONS.has(actual_extension)) {
+                          return (
+                            <Suspense key={`inline-${partIndex}`} fallback={displayTime}>
+                              <AsyncVideoPopover
+                                filename={filename}
+                                seconds={parseInt(seconds)}
+                                displayTime={displayTime}
+                                getFileUrl={getFileUrl}
+                              />
+                            </Suspense>
+                          );
+                        }
+                        return displayTime;
                       }
-                      return null;
-                    })}
-                  </div>
-                )}
+                      // For text parts, render as Markdown (with tables support)
+                      return <ReactMarkdown key={`text-${partIndex}`} remarkPlugins={[remarkGfm]}>{part}</ReactMarkdown>;
+                    })
+                  )}
+                  {message.role === 'assistant' && isSpeechSupported && (
+                    <button 
+                      onClick={() => isSpeaking ? stopSpeaking() : speak(message.content)}
+                      style={{
+                        marginLeft: '8px',
+                        padding: '4px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {isSpeaking ? '🔇' : '🔊'}
+                    </button>
+                  )}
+                  {message.metadata && Object.keys(message.metadata).length > 0 && (
+                    <div className="additional-content">
+                      {Object.keys(message.metadata).map((location, metaIndex) => {
+                        if (location) {
+                          const actualExtension = location.split('_').pop().split('.')[0];
+                          const baseFileName = location.substring(0, location.lastIndexOf('_'));
+                          const tryOpenDocument = async () => {
+                            try {
+                              const session = await Auth.currentSession();
+                              const token = session.getIdToken().getJwtToken();
+                              const cloudFrontDomain = getCloudFrontDomain(); 
+                              const actualExtension = location.split('_').pop().split('.')[0];
+                              const baseFileName = location.substring(0, location.lastIndexOf('_'));
+                              const url = `https://${cloudFrontDomain}.cloudfront.net/${baseFileName}.${actualExtension}`;
+                              const encodedToken = encodeURIComponent(token);
+                              const urlWithAuth = `${url}?auth=${encodedToken}`;
+                              window.open(urlWithAuth, '_blank', 'noopener');
+                            } catch (error) {
+                              console.error('Error:', error);
+                              alert('Error opening content: ' + error.message);
+                            }
+                          };
+                          const fileNameWithExt = `${baseFileName}.${actualExtension}`;
+                          return (
+                            <div key={`content-${metaIndex}`} className="know-more-section">
+                              <Button onClick={tryOpenDocument}>
+                                {`Know More (${fileNameWithExt})`}
+                              </Button>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  )}
                 </div>
               </ChatBubble>
             )}
