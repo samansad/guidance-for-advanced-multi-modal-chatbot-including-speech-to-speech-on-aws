@@ -120,6 +120,11 @@ const AsyncVideoPopover = ({ filename, seconds, displayTime, getFileUrl }) => {
 };
 
 const Chat = () => {
+  // Handler for New Chat button
+  const handleNewChat = () => {
+    setMessages([]);
+    sessionStorage.removeItem('chatSession');
+  };
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -514,6 +519,10 @@ const Chat = () => {
 
   return (
     <div className="chat-container">
+      <div className="chat-header" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+        <Button onClick={handleNewChat} variant="normal">New Chat</Button>
+        {/* Assuming you have a Sign Out button elsewhere, place this beside it. If not, add it here as needed. */}
+      </div>
       <div className="messages">
         {messages.map((message, index) => (
           <div key={index}>
@@ -592,36 +601,67 @@ const Chat = () => {
                   {message.metadata && Object.keys(message.metadata).length > 0 && (
                     <div className="additional-content">
                       {Object.keys(message.metadata).map((location, metaIndex) => {
-                        if (location) {
-                          const actualExtension = location.split('_').pop().split('.')[0];
-                          const baseFileName = location.substring(0, location.lastIndexOf('_'));
-                          const tryOpenDocument = async () => {
-                            try {
-                              const session = await Auth.currentSession();
-                              const token = session.getIdToken().getJwtToken();
-                              const cloudFrontDomain = getCloudFrontDomain(); 
-                              const actualExtension = location.split('_').pop().split('.')[0];
-                              const baseFileName = location.substring(0, location.lastIndexOf('_'));
-                              const url = `https://${cloudFrontDomain}.cloudfront.net/${baseFileName}.${actualExtension}`;
-                              const encodedToken = encodeURIComponent(token);
-                              const urlWithAuth = `${url}?auth=${encodedToken}`;
-                              window.open(urlWithAuth, '_blank', 'noopener');
-                            } catch (error) {
-                              console.error('Error:', error);
-                              alert('Error opening content: ' + error.message);
+                          if (location) {
+                            // Determine extension and baseFileName based on file type
+                            let url = '';
+                            let fileNameWithExt = '';
+                            const lastDot = location.lastIndexOf('.');
+                            const ext = lastDot !== -1 ? location.substring(lastDot + 1).toLowerCase() : '';
+                            // Special handling for media files named like ..._ext.txt
+                            let mediaMatch = location.match(/(.+)_([a-z0-9]+)\.txt$/i);
+                            if (mediaMatch && MEDIA_EXTENSIONS.has(mediaMatch[2].toLowerCase())) {
+                              // e.g. .../Day 2 group 3_mp2.txt => .../Day 2 group 3.mp2
+                              const baseFileName = mediaMatch[1];
+                              const actualExtension = mediaMatch[2];
+                              url = `https://${getCloudFrontDomain()}.cloudfront.net/${encodeURIComponent(baseFileName)}.${actualExtension}`;
+                              fileNameWithExt = `${baseFileName}.${actualExtension}`;
+                            } else if (MEDIA_EXTENSIONS.has(ext)) {
+                              // Media file with direct extension
+                              url = `https://${getCloudFrontDomain()}.cloudfront.net/${encodeURIComponent(location)}`;
+                              fileNameWithExt = location;
+                            } else if (ext === 'txt') {
+                              // Check if it's a transcript (e.g. .pdf.txt, .docx.txt, etc.)
+                              const beforeTxt = location.substring(0, lastDot);
+                              const secondLastDot = beforeTxt.lastIndexOf('.');
+                              const transcriptExt = secondLastDot !== -1 ? beforeTxt.substring(secondLastDot + 1).toLowerCase() : '';
+                              // List of common document extensions
+                              const DOC_EXTS = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'csv', 'rtf', 'odt', 'ods', 'odp'];
+                              if (DOC_EXTS.includes(transcriptExt)) {
+                                // It's a transcript, strip .txt only
+                                url = `https://${getCloudFrontDomain()}.cloudfront.net/${encodeURIComponent(beforeTxt)}`;
+                                fileNameWithExt = beforeTxt;
+                              } else {
+                                // It's a plain .txt file
+                                url = `https://${getCloudFrontDomain()}.cloudfront.net/${encodeURIComponent(location)}`;
+                                fileNameWithExt = location;
+                              }
+                            } else {
+                              // Other file types
+                              url = `https://${getCloudFrontDomain()}.cloudfront.net/${encodeURIComponent(location)}`;
+                              fileNameWithExt = location;
                             }
-                          };
-                          const fileNameWithExt = `${baseFileName}.${actualExtension}`;
-                          return (
-                            <div key={`content-${metaIndex}`} className="know-more-section">
-                              <Button onClick={tryOpenDocument}>
-                                {`Know More (${fileNameWithExt})`}
-                              </Button>
-                            </div>
-                          );
-                        }
-                        return null;
-                      })}
+                            const tryOpenDocument = async () => {
+                              try {
+                                const session = await Auth.currentSession();
+                                const token = session.getIdToken().getJwtToken();
+                                const encodedToken = encodeURIComponent(token);
+                                const urlWithAuth = `${url}?auth=${encodedToken}`;
+                                window.open(urlWithAuth, '_blank', 'noopener');
+                              } catch (error) {
+                                console.error('Error:', error);
+                                alert('Error opening content: ' + error.message);
+                              }
+                            };
+                            return (
+                              <div key={`content-${metaIndex}`} className="know-more-section">
+                                <Button onClick={tryOpenDocument}>
+                                  {`Know More (${fileNameWithExt})`}
+                                </Button>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })}
                     </div>
                   )}
                 </div>
