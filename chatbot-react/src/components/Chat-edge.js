@@ -60,21 +60,33 @@ const parseMetadata = (metadataLines) => {
 };
 
 const parseTimestamps = (answer, parsedMetadata) => {
-  return answer.replace(/\[([\d\-]+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
+  // Replace [time filename] as before, and also handle [filename] (no time)
+  let result = answer.replace(/\[([\d\-]+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
     if (Object.keys(parsedMetadata).includes(filename)) {
       const actual_extension = filename.split('_').pop().split('.')[0];
       if (MEDIA_EXTENSIONS.has(actual_extension)) {
         // If seconds is a range, use the first value
         const firstSeconds = seconds.includes('-') ? seconds.split('-')[0] : seconds;
         const formattedTime = convertTime(firstSeconds);
-        const result = `|||TIMESTAMP:${seconds}:${formattedTime}:${filename}|||`;
-        return result;
+        return `|||TIMESTAMP:${seconds}:${formattedTime}:${filename}|||`;
       } else {
         return '';
       }
     }
     return match;
   });
+  // Now handle [filename] (no time) for known media files in metadata
+  result = result.replace(/\[([^\[\]\s]+)\]/g, (match, filename) => {
+    if (Object.keys(parsedMetadata).includes(filename)) {
+      const actual_extension = filename.split('_').pop().split('.')[0];
+      if (MEDIA_EXTENSIONS.has(actual_extension)) {
+        // Just show the filename, no brackets
+        return filename;
+      }
+    }
+    return match;
+  });
+  return result;
 };
 
 const getFileUrl = async (filename) => {
