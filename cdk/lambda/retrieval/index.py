@@ -24,6 +24,46 @@ ops_kb_id = os.environ.get("OPS_KNOWLEDGE_BASE_ID")
 # Get number of results for retrival from environment variable or default to 3
 num_results = int(os.environ.get("NUM_RESULTS", "5"))
 
+# --- BEGIN: CSV Segment/Model Mapping for RAG Expansion ---
+def load_segment_model_mapping_from_s3():
+    """
+    Loads the segment/model mapping CSV from S3 and returns:
+    - model_to_segment: {model_name: segment}
+    - segment_to_models: {segment: set([model1, model2, ...])}
+    """
+    s3_uri = os.environ.get("CITATION_CSV_URI")
+    if not s3_uri:
+        logger.warning("CITATION_CSV_URI env var not set, skipping segment/model mapping.")
+        return None, None
+    match = re.match(r'^s3://([^/]+)/(.+)$', s3_uri)
+    if not match:
+        logger.error(f"Invalid S3 URI format: {s3_uri}")
+        return None, None
+    bucket, key = match.group(1), match.group(2)
+    try:
+        s3 = boto3.client('s3')
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        csv_content = obj['Body'].read().decode('utf-8')
+        reader = csv.DictReader(StringIO(csv_content))
+        model_to_segment = {}
+        segment_to_models = {}
+        for row in reader:
+            model = row.get('VHCL_MK_MDL_NM')
+            segment = row.get('SGMNT_NM')
+            if model and segment:
+                model = model.strip()
+                segment = segment.strip()
+                model_to_segment[model] = segment
+                segment_to_models.setdefault(segment, set()).add(model)
+        logger.info(f"Loaded {len(model_to_segment)} model-to-segment mappings from CSV.")
+        return model_to_segment, segment_to_models
+    except Exception as e:
+        logger.error(f"Error loading segment/model mapping from S3: {e}")
+        return None, None
+
+# --- END: CSV Segment/Model Mapping for RAG Expansion ---
+
+
 _default_model_code_name_mapping = {
     "P42R": "Pathfinder",
     "PZ1D": "Leaf",
@@ -99,8 +139,63 @@ def retrieve_results(query, kb_id):
         List of context information strings
     """
     model_code_name_mapping = load_model_code_name_mapping_from_s3() or _default_model_code_name_mapping
-    # expand the query with model code and model names
+    # --- BEGIN: Segment/Model Expansion (improved matching) ---
+    model_to_segment, segment_to_models = load_segment_model_mapping_from_s3()
     expanded_query = query
+    found_model = None
+    found_segment = None
+    competitor_models = set()
+    # Try to find a model in the query (case-insensitive, allow partial matches)
+    if model_to_segment:
+        logger.info("Searching for models in query from model_to_segment (partial and full matches).")
+        query_lower = query.lower()
+        # First, try exact (full) match
+        for model in model_to_segment:
+            if model.lower() in query_lower:
+                found_model = model
+                found_segment = model_to_segment[model]
+                break
+        # If not found, try partial match (e.g., 'Rogue' matches 'Nissan - Rogue')
+        if not found_model:
+            for model in model_to_segment:
+                # Split model name on dashes, slashes, and spaces
+                model_parts = [part.strip() for part in re.split(r'[-/ ]', model)]
+                for part in model_parts:
+                    # Only match if part is at least 3 characters and is a whole word in the query
+                    if part and len(part) >= 3:
+                        # Use regex to match whole word (\b...\b)
+                        if re.search(rf'\b{re.escape(part.lower())}\b', query_lower):
+                            found_model = model
+                            found_segment = model_to_segment[model]
+                            logger.info(f"Partial model match: '{part}' in query matches '{model}'")
+                            break
+                if found_model:
+                    break
+    # Try to find a segment in the query (case-insensitive, allow partial matches)
+    if not found_segment and segment_to_models:
+        for segment in segment_to_models:
+            if segment.lower() in query.lower():
+                found_segment = segment
+                logger.info(f"Found segment in query: {segment}")
+                break
+    # If found, get all models in the same segment
+    logger.info(f"Found model: {found_model}, segment: {found_segment}")
+    if found_segment and segment_to_models:
+        competitor_models = segment_to_models[found_segment]
+        if found_model:
+            competitor_models = competitor_models - {found_model}
+        # Expand the query: add segment and all models in that segment
+        expansion_terms = []
+        if found_model:
+            expansion_terms.append(found_model)
+        expansion_terms.append(found_segment)
+        expansion_terms += list(competitor_models)
+        # Remove duplicates, preserve order
+        seen = set()
+        expansion_terms = [x for x in expansion_terms if x and not (x in seen or seen.add(x))]
+        expanded_query += "\nRelated models and segment: " + ", ".join(expansion_terms)
+        logger.info(f"Expanded query with segment and competitors: {expansion_terms}")
+    # Also expand with model code/name mapping as before
     for model_code, model_name in model_code_name_mapping.items():
         if (model_code in query) or (model_name in query):
             note = f"(Note: {model_code} refers to {model_name})"
