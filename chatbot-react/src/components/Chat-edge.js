@@ -14,7 +14,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 // Set of valid media extensions
-const MEDIA_EXTENSIONS = new Set(['mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm', 'mov']);
+const MEDIA_EXTENSIONS = new Set(['mp2', 'mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm', 'mov']);
 
 // Utility function to convert time
 const convertTime = (stime) => {
@@ -350,11 +350,28 @@ const Chat = () => {
 
             const metadata = parseMetadata(combinedMetadata.split('\n'));
             setParsedMetadata(metadata);
-            const parsedAnswer = parseTimestamps(answerText, metadata);
+            let parsedAnswer = parseTimestamps(answerText, metadata);
+            // Improved Markdown numbered list fix: only join lines that are part of a numbered list item, but preserve other formatting.
+            // This version only joins lines that are indented or start with whitespace after a numbered list header.
+            parsedAnswer = parsedAnswer.replace(/(\d+\.\s+\*\*[^\n]+\*\*:\s*)([\s\S]*?)(?=\n\d+\.|$)/g, (match, header, body) => {
+              // Only join lines that are indented (start with space/tab) or empty, otherwise keep as is
+              const lines = body.split(/\n/);
+              const joined = lines.map((line, idx) => {
+                if (idx === 0) return line.trim();
+                // Only join if line is indented or empty
+                if (/^\s/.test(line) || line.trim() === '') {
+                  return line.trim();
+                } else {
+                  // If not indented, treat as a new paragraph (keep newline)
+                  return '\n' + line.trim();
+                }
+              }).join(' ');
+              return `${header}${joined}\n`;
+            });
 
             setMessages(prev => [...prev, { 
               role: 'assistant', 
-              content: parsedAnswer.replace(/\\n/g, '\n').replace(/\\"/g, '"'),
+              content: parsedAnswer.replace(/\n/g, '\n').replace(/\"/g, '"'),
               metadata: metadata // if available
             }]);
           } else {
