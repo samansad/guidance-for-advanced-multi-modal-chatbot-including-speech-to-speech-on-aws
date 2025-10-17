@@ -63,7 +63,9 @@ const parseTimestamps = (answer, parsedMetadata) => {
   // Replace [time filename] as before, and also handle [filename] (no time)
   let result = answer.replace(/\[([\d\-]+)\s+([^\]]+)\]/g, (match, seconds, filename) => {
     if (Object.keys(parsedMetadata).includes(filename)) {
-      const actual_extension = filename.split('_').pop().split('.')[0];
+      //const actual_extension = filename.split('_').pop().split('.')[0];
+      const parts = filename.split('.');
+      const actual_extension = parts.length > 1 ? parts[parts.length - 2] : '';
       if (MEDIA_EXTENSIONS.has(actual_extension)) {
         // If seconds is a range, use the first value
         const firstSeconds = seconds.includes('-') ? seconds.split('-')[0] : seconds;
@@ -78,7 +80,9 @@ const parseTimestamps = (answer, parsedMetadata) => {
   // Now handle [filename] (no time) for known media files in metadata
   result = result.replace(/\[([^\[\]\s]+)\]/g, (match, filename) => {
     if (Object.keys(parsedMetadata).includes(filename)) {
-      const actual_extension = filename.split('_').pop().split('.')[0];
+      //const actual_extension = filename.split('_').pop().split('.')[0];
+      const parts = filename.split('.');
+      const actual_extension = parts.length > 1 ? parts[parts.length - 2] : '';
       if (MEDIA_EXTENSIONS.has(actual_extension)) {
         // Just show the filename, no brackets
         return filename;
@@ -91,7 +95,9 @@ const parseTimestamps = (answer, parsedMetadata) => {
 
 const getFileUrl = async (filename) => {
   if (filename) {
-    const actual_extension = filename.split('_').pop().split('.')[0];
+    //const actual_extension = filename.split('_').pop().split('.')[0];
+    const parts = filename.split('.');
+    const actual_extension = parts.length > 1 ? parts[parts.length - 2] : '';
     const baseFileName = filename.split('.')[0].replace(`_${actual_extension}`, '').replace(/ /g, '%20');
     console.log('Fetching URL for: Filename:', filename, '  Base Filename:', baseFileName, '  Extension:', actual_extension);
     try {
@@ -594,7 +600,9 @@ const Chat = () => {
                         const lastColonIndex = remaining.lastIndexOf(':');
                         const displayTime = remaining.substring(0, lastColonIndex);
                         const filename = remaining.substring(lastColonIndex + 1);
-                        const actual_extension = filename?.split('_').pop().split('.')[0];
+                        //const actual_extension = filename?.split('_').pop().split('.')[0];
+                        const parts = filename.split('.');
+                        const actual_extension = parts.length > 1 ? parts[parts.length - 2] : '';
                         if (message.metadata && MEDIA_EXTENSIONS.has(actual_extension)) {
                           return (
                             <Suspense key={`inline-${partIndex}`} fallback={displayTime}>
@@ -637,7 +645,8 @@ const Chat = () => {
                             const lastDot = location.lastIndexOf('.');
                             const ext = lastDot !== -1 ? location.substring(lastDot + 1).toLowerCase() : '';
                             // Special handling for media files named like ..._ext.txt
-                            let mediaMatch = location.match(/(.+)_([a-z0-9]+)\.txt$/i);
+                            //let mediaMatch = location.match(/(.+)_([a-z0-9]+)\.txt$/i);
+                            let mediaMatch = location.match(/(.+)\.([a-z0-9]+)\.txt$/i);
                             if (mediaMatch && MEDIA_EXTENSIONS.has(mediaMatch[2].toLowerCase())) {
                               // e.g. .../Day 2 group 3_mp2.txt => .../Day 2 group 3.mp2
                               const baseFileName = mediaMatch[1];
