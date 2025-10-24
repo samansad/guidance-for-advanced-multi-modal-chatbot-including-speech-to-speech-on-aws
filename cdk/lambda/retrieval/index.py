@@ -435,14 +435,15 @@ def lambda_handler(event, context):
         
         Part 2 - Location:
         - List ONLY the <location> tags from sources that contributed to your answer.
-        - If a <folder> tag exists and is non-empty, combine it with the <location> value using a slash: <location>folder/filename</location>
-        - If no <folder> is present, just output the filename: <location>filename</location>
+        - Do NOT modify the location value and do NOT remove folder structure from what was provided in <location>location</location>
         - One <location> per line. Do not add other text. Each line must have <location> and </location>
         - Each <location></location> tag MUST contain only ONE file. Do NOT place more than one file info in a single 
 
                 
         ERROR HANDLING:
         - If insufficient information is found or you cannot make a conclusion, state that you cannot provide an exact answer and request more context if appropriate. DO NOT add <location> </location> or <answer> </answer> tags
+
+        User Question: {query.strip()}
 
         {chat_history_context}
         Here are the search results:
