@@ -139,11 +139,19 @@ const AsyncVideoPopover = ({ filename, seconds, displayTime, getFileUrl }) => {
 
 const Chat = () => {
   // Handler for New Chat button
+  const instructionsMessage = {
+    role: 'info',
+    content: `This platform provides access to insights from past MI field research\ncovering three key studies:\n**- Product Competitiveness Clinic (PCC)**\n**- Marcom Communication Strategy Study (MCSS)**\n**- Product Quality After Launch Review (PQ-ALR)**\n\nThe solution focuses on three vehicles: \n**Rogue (P33A; 2018-2021), Pathfinder (P42R; 2018-2021), and Leaf (PZ1D – ALR excluded; 2022-2023)**\nUse this tool to search and extract insights from available datasets—including presentations, transcripts, videos, and spreadsheets—to support efficient and productive decision-making.\n\nSample Prompts:\n**Based on videos only what do people think of Pathfinder?**\n**Can you tell me all points in customer interviews where potential customers express what they want from their next vehicle?**`
+  };
   const handleNewChat = () => {
-    setMessages([]);
+    setMessages([instructionsMessage]);
     sessionStorage.removeItem('chatSession');
   };
   const [messages, setMessages] = useState([]);
+  // Show instructions on page load (not sent to backend, not saved in chatSession)
+  useEffect(() => {
+    setMessages([instructionsMessage]);
+  }, []);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [parsedMetadata, setParsedMetadata] = useState({});
@@ -573,6 +581,22 @@ const Chat = () => {
                 }
               >
                 {message.content}
+              </ChatBubble>
+            ) : message.role === 'info' ? (
+              <ChatBubble
+                type="incoming"
+                avatar={
+                  <Avatar
+                    color="gen-ai"
+                    iconName="gen-ai"
+                    ariaLabel="Info"
+                    tooltipText="Info"
+                  />
+                }
+              >
+                <div className="custom-message-content">
+                  <ReactMarkdown>{message.content}</ReactMarkdown>
+                </div>
               </ChatBubble>
             ) : (
               <ChatBubble

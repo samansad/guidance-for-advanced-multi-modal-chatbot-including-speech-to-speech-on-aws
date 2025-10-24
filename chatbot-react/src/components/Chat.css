@@ -224,3 +224,7 @@ code {
   flex-shrink: 0;
 }
 
+.header h1 {
+  text-align: center;
+}
+
