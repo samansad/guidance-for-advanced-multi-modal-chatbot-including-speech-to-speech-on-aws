@@ -16,6 +16,16 @@ import remarkGfm from 'remark-gfm';
 // Set of valid media extensions
 const MEDIA_EXTENSIONS = new Set(['mp2', 'mp3', 'mp4', 'wav', 'flac', 'ogg', 'amr', 'webm', 'mov']);
 
+const key = Object.keys(localStorage).find(
+  k => k.startsWith('CognitoIdentityServiceProvider.') && k.endsWith('.userData')
+);
+
+const userEmail = key ? JSON.parse(localStorage.getItem(key)).UserAttributes.find(attr => attr.Name === 'email').Value : null;
+console.log('User email from Cognito:', userEmail);
+
+
+
+
 // Utility function to convert time
 const convertTime = (stime) => {
   if (!stime) return '';
@@ -535,7 +545,8 @@ const Chat = () => {
       guardrailVersion: guardrailVersion,
       temperature: temperature,
       topP: topP,
-      chatHistory: chatHistory.length > 0 ? chatHistory : undefined
+      chatHistory: chatHistory.length > 0 ? chatHistory : undefined,
+      userEmail: userEmail
     };
     console.log('Payload to be sent:', payload);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
