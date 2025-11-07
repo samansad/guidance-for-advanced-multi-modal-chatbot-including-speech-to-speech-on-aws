@@ -340,6 +340,7 @@ const Chat = () => {
 
       socket.onmessage = (event) => {
         try {
+          setMessages(prev => prev.filter(m => m.id !== 'thinking'));
           let data = event.data;
           console.log('WebSocket message received:', data);
           // Try to parse as JSON if possible
@@ -558,6 +559,13 @@ const Chat = () => {
       }]);
     }
     saveToSession('user', userMessage);
+
+    //Setting Thinking:
+    setMessages(prev => [
+      ...prev,
+      { role: 'assistant', content: 'Thinking…', id: 'thinking', ephemeral: true }
+    ]);
+
     setIsLoading(false);
   };
 
