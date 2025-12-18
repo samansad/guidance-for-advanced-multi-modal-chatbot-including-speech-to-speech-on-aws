@@ -1,4 +1,5 @@
-# This Code was not used as part of Final POC.
+# This lambda function processes multimedia content using BDA and stores results on S3.
+
 from typing import Dict, List, Any
 import json, os, logging, boto3
 from operator import itemgetter
@@ -508,59 +509,58 @@ class ContentProcessor:
 
 def lambda_handler(event, context):
     logger.info(f"Received BDA Invocation response: {event}")
-    if event['detail-type'] == 'Bedrock Data Automation Job Succeeded':
-        try:
-            # Extract S3 details from the event
-            detail = event['detail']
-            output_bucket = os.environ['ORGANIZED_BUCKET']
-            base_path = detail['output_s3_location']['name']
-            
-            # Get original filename with underscore and extension without dot
-            original_filename = f"{os.path.splitext(detail['input_s3_object']['name'])[0]}_{os.path.splitext(detail['input_s3_object']['name'])[1][1:]}"
-            # Construct the full S3 path for result.json
-            result_key = f"{base_path}/standard_output/0/result.json"
-            
-            # Create S3 client
-            s3_client = boto3.client('s3')
-            
-            # Download the result.json file
-            response = s3_client.get_object(
-                Bucket=output_bucket,
-                Key=result_key
-            )
-            logger.info(f"Downloaded BDA invocation result")
-            # Read the content of the file
-            result_content = json.loads(response['Body'].read().decode('utf-8'))
+    try:
+        # Extract S3 details from the event
+        output_bucket = event['outputBucket']
+        bda_output_uri = event['bdaOutputUri']
+        
+        # Get original filename with underscore and extension without dot
+        original_filename = event['originalFilePath']
+        # Construct the full S3 path for result.json
+        result_key = str(bda_output_uri).split(output_bucket + '/')[1].replace("job_metadata.json", "0/standard_output/0/result.json")
+        
+        # Create S3 client
+        s3_client = boto3.client('s3')
 
-            processor = ContentProcessor()
-            processed_result = processor.process_content(result_content)
+        print(output_bucket, result_key)
+        
+        # Download the result.json file
+        response = s3_client.get_object(
+            Bucket=output_bucket,
+            Key=result_key
+        )
+        logger.info(f"Downloaded BDA invocation result")
+        # Read the content of the file
+        result_content = json.loads(response['Body'].read().decode('utf-8'))
 
-            # Save processed result to Documents folder
-            processed_key = f"Documents/{original_filename}.txt"
-            
-            s3_client.put_object(
-                Bucket=output_bucket,
-                Key=processed_key,
-                Body=processed_result.encode('utf-8'),
-                ContentType='text/plain'
-            )
-            
-            logger.info(f"Saved processed result to s3://{output_bucket}/{processed_key}")
-            
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Successfully processed result.json',
-                    'result': result_content
-                })
-            }
-            
-        except Exception as e:
-            print(f"Error processing result.json: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({
-                    'message': 'Error processing result.json',
-                    'error': str(e)
-                })
-            }
+        processor = ContentProcessor()
+        processed_result = processor.process_content(result_content)
+
+        # Save processed result to Documents folder
+        processed_key = f"Documents/{original_filename}.txt"
+        
+        s3_client.put_object(
+            Bucket=output_bucket,
+            Key=processed_key,
+            Body=processed_result.encode('utf-8'),
+            ContentType='text/plain'
+        )
+        
+        logger.info(f"Saved processed result to s3://{output_bucket}/{processed_key}")
+        
+        return {
+            'statusCode': 200,
+            'body': json.dumps({
+                'message': 'Successfully processed result.json'
+            })
+        }
+        
+    except Exception as e:
+        print(f"Error processing result.json: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({
+                'message': 'Error processing result.json',
+                'error': str(e)
+            })
+        }

@@ -1,0 +1,242 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "For Each URI",
+  "States": {
+    "For Each URI": {
+      "Type": "Map",
+      "ItemProcessor": {
+        "ProcessorConfig": {
+          "Mode": "INLINE"
+        },
+        "StartAt": "Route by File Type",
+        "States": {
+          "Route by File Type": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Next": "CopyObject",
+                "Condition": "{% $lowercase($substringAfter($states.input.input_uri, \".\")) in [\"csv\",\"txt\",\"json\"] %}"
+              },
+              {
+                "Next": "Convert Office Files",
+                "Condition": "{% $lowercase($substringAfter($states.input.input_uri, \".\")) in [\"pptx\",\"ppt\",\"xlsx\",\"xls\",\"doc\",\"docx\",\"xlsm\"] %}"
+              }
+            ],
+            "Default": "Convert Single items to list"
+          },
+          "Convert Single items to list": {
+            "Type": "Pass",
+            "Next": "For Each Converted URI",
+            "Output": "{% $type($states.input) = 'array' ? $states.input : [$states.input] %}"
+          },
+          "CopyObject": {
+            "Type": "Task",
+            "Arguments": {
+              "Bucket": "{% $split($substringAfter($states.input.output_uri, 's3://'), '/')[0] %}",
+              "CopySource": "{% $substringAfter($states.input.input_uri, 's3://') %}",
+              "Key": "{% 'Documents' & $substringAfter($states.input.output_uri, 'bda-output') & $split($states.input.input_uri, '/')[-1] %}"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:s3:copyObject",
+            "End": true
+          },
+          "Convert Office Files": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Output": "{% $states.result.Payload %}",
+            "Arguments": {
+              "FunctionName": "arn:aws:lambda:us-east-1:560551404215:function:convert-office-to-pdf:$LATEST",
+              "Payload": {
+                "input_uri": "{% $states.input.input_uri %}",
+                "output_uri": "{% $states.input.output_uri %}"
+              }
+            },
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 1,
+                "MaxAttempts": 3,
+                "BackoffRate": 2,
+                "JitterStrategy": "FULL"
+              }
+            ],
+            "Next": "Get return body"
+          },
+          "Get return body": {
+            "Type": "Pass",
+            "Next": "For Each Converted URI",
+            "Output": "{% $states.input.body %}"
+          },
+          "For Each Converted URI": {
+            "Type": "Map",
+            "ItemProcessor": {
+              "ProcessorConfig": {
+                "Mode": "INLINE"
+              },
+              "StartAt": "Establish Variables",
+              "States": {
+                "Establish Variables": {
+                  "Type": "Pass",
+                  "Next": "InvokeDataAutomationAsync",
+                  "Assign": {
+                    "outputBucket": "{% $substringBefore($substringAfter($states.input[0].output_uri, 's3://'), '/') %}",
+                    "outputPath": "{% $substringAfter($substringAfter($states.input[0].output_uri, 's3://'), '/') %}",
+                    "originalFilePath": "{% $substringAfter($substringAfter($states.input[0].input_uri, 's3://'), '/') %}"
+                  }
+                },
+                "InvokeDataAutomationAsync": {
+                  "Type": "Task",
+                  "Arguments": {
+                    "DataAutomationProfileArn": "arn:aws:bedrock:us-east-1:560551404215:data-automation-profile/us.data-automation-v1",
+                    "InputConfiguration": {
+                      "S3Uri": "{% $states.input.input_uri %}"
+                    },
+                    "OutputConfiguration": {
+                      "S3Uri": "{% $states.input.output_uri %}"
+                    },
+                    "DataAutomationConfiguration": {
+                      "DataAutomationProjectArn": "arn:aws:bedrock:us-east-1:560551404215:data-automation-project/9e0e685cac22",
+                      "Stage": "LIVE"
+                    }
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:bedrockdataautomationruntime:invokeDataAutomationAsync",
+                  "Next": "Wait 30 seconds - bda"
+                },
+                "Wait 30 seconds - bda": {
+                  "Type": "Wait",
+                  "Seconds": 30,
+                  "Next": "GetDataAutomationStatus"
+                },
+                "GetDataAutomationStatus": {
+                  "Type": "Task",
+                  "Arguments": {
+                    "InvocationArn": "{% $states.input.InvocationArn %}"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:bedrockdataautomationruntime:getDataAutomationStatus",
+                  "Next": "BDA ingestion complete?",
+                  "Output": {
+                    "Status": "{% $states.result.Status %}",
+                    "InvocationArn": "{% $states.input.InvocationArn %}",
+                    "FullOutput": "{% $states.result %}"
+                  }
+                },
+                "BDA ingestion complete?": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Next": "bda process invoke",
+                      "Condition": "{% $states.input.Status = 'Success' %}"
+                    },
+                    {
+                      "Next": "Wait 30 seconds - bda",
+                      "Condition": "{% $states.input.Status = 'InProgress' %}"
+                    }
+                  ],
+                  "Default": "Fail BDA"
+                },
+                "Fail BDA": {
+                  "Type": "Fail"
+                },
+                "bda process invoke": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::lambda:invoke",
+                  "Output": "{% $states.result.Payload %}",
+                  "Arguments": {
+                    "FunctionName": "arn:aws:lambda:us-east-1:560551404215:function:bda-processor-dev:$LATEST",
+                    "Payload": {
+                      "bdaOutputUri": "{% $states.input.FullOutput.OutputConfiguration.S3Uri %}",
+                      "outputBucket": "{% $outputBucket %}",
+                      "outputPath": "{% $outputPath %}",
+                      "originalFilePath": "{% $originalFilePath %}"
+                    }
+                  },
+                  "Retry": [
+                    {
+                      "ErrorEquals": [
+                        "Lambda.ServiceException",
+                        "Lambda.AWSLambdaException",
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException"
+                      ],
+                      "IntervalSeconds": 1,
+                      "MaxAttempts": 3,
+                      "BackoffRate": 2,
+                      "JitterStrategy": "FULL"
+                    }
+                  ],
+                  "End": true
+                }
+              }
+            },
+            "End": true,
+            "MaxConcurrency": 40
+          }
+        }
+      },
+      "Next": "Choice (1)",
+      "MaxConcurrency": 20
+    },
+    "Choice (1)": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "StartIngestionJob",
+          "Condition": "{% 1 = 0 %}"
+        }
+      ],
+      "Default": "Success (1)"
+    },
+    "Success (1)": {
+      "Type": "Succeed"
+    },
+    "StartIngestionJob": {
+      "Type": "Task",
+      "Arguments": {
+        "DataSourceId": "ZHDYGGXEMJ",
+        "KnowledgeBaseId": "V56K8SUQTG"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:bedrockagent:startIngestionJob",
+      "Next": "Wait 15 seconds - knowledge base"
+    },
+    "Wait 15 seconds - knowledge base": {
+      "Type": "Wait",
+      "Seconds": 5,
+      "Next": "GetIngestionJob"
+    },
+    "GetIngestionJob": {
+      "Type": "Task",
+      "Arguments": {
+        "DataSourceId": "{% $states.input.IngestionJob.DataSourceId %}",
+        "IngestionJobId": "{% $states.input.IngestionJob.IngestionJobId %}",
+        "KnowledgeBaseId": "{% $states.input.IngestionJob.KnowledgeBaseId %}"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:bedrockagent:getIngestionJob",
+      "Next": "Choice"
+    },
+    "Choice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Next": "Success",
+          "Condition": "{% $states.input.IngestionJob.Status = 'COMPLETE' %}"
+        },
+        {
+          "Next": "Fail Knowledge Base",
+          "Condition": "{% $states.input.IngestionJob.Status = 'FAILURE' %}"
+        }
+      ],
+      "Default": "Wait 15 seconds - knowledge base"
+    },
+    "Success": {
+      "Type": "Succeed"
+    },
+    "Fail Knowledge Base": {
+      "Type": "Fail"
+    }
+  },
+  "QueryLanguage": "JSONata"
+}

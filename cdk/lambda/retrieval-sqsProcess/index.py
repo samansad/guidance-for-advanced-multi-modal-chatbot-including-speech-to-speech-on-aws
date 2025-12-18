@@ -1,3 +1,4 @@
+# This is the core code to work with BedRock to handle retrieval and generation.
 import os
 import re
 import boto3

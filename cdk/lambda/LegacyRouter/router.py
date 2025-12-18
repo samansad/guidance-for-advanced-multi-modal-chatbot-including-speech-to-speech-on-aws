@@ -1,3 +1,4 @@
+# This was the code when not using SQS queueing.It was Not used as part of final POC.
 import json, boto3
 import logging
 

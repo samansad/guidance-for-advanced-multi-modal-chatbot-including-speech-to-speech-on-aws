@@ -1,3 +1,4 @@
+# This Lambda receives the message from SQS, work with BedRock to get the response, and write the response into WebSocket.
 import json, boto3
 import logging
 

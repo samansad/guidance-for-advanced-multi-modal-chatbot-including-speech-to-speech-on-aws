@@ -1,3 +1,5 @@
+# This lambda function is triggered by API Gateway WebSocket events.
+# It writes the WebSocket connection information and message content to an SQS queue for further processing.
 import json
 import boto3
 import os
